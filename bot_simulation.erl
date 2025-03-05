@@ -20,18 +20,26 @@ start() ->
             simulate(Paths)
     end.
 
-start_manual(BotTuples) ->
-    %% BotTuples should be a list of tuples of Form {BotId, Start, Goal}
+start_manual(PositionList) ->
     init_db(),
-    io:format("Using manual bot coordinates: ~p~n", [BotTuples]),
-    case cbs:search(BotTuples) of
-        {error, no_solution} ->
-            io:format("No solution found for the provided bots.~n");
-        Paths ->
-            io:format("Computed Paths: ~p~n", [Paths]),
-            store_paths(Paths),
-            simulate(Paths)
+    Bots = manual_generate_bots(PositionList),
+    case Bots of
+        [] ->
+            io:format("No valid bots provided.~n"),
+            {error, no_valid_bots};
+        _ ->
+            io:format("Generated Bots: ~p~n", [Bots]),
+            BotTuples = [{Bot#bot.id, Bot#bot.start, Bot#bot.goal} || Bot <- Bots],
+            case cbs:search(BotTuples) of
+                {error, no_solution} ->
+                    io:format("No solution found for given bots.~n");
+                Paths ->
+                    io:format("Computed Paths: ~p~n", [Paths]),
+                    store_paths(Paths),
+                    simulate(Paths)
+            end
     end.
+
 
 init_db() ->
     mnesia:create_schema([node()]),
@@ -60,9 +68,12 @@ generate_bots(N, Acc) ->
     Goal = {random_between(1,10), random_between(1,10)},
     case {Start =:= Goal,
           lists:any(fun(B) ->
-                        (B#bot.start =:= Start) orelse (B#bot.goal =:= Start) orelse
-                        (B#bot.start =:= Goal) orelse (B#bot.goal =:= Goal)
+                        (B#bot.start =:= Start) orelse (B#bot.goal =:= Goal)
                     end, Acc)} of
+        %   lists:any(fun(B) ->
+        %                 (B#bot.start =:= Start) orelse (B#bot.goal =:= Start) orelse
+        %                 (B#bot.start =:= Goal) orelse (B#bot.goal =:= Goal)
+        %             end, Acc)} of
         {true, _} ->
             generate_bots(N, Acc);
         {_, true} ->
@@ -98,9 +109,58 @@ get_position(Path, Time) ->
         true -> lists:last(Path)
     end.
 
+
 print_summary(Paths, TotalTime) ->
-    io:format("Final Bot Paths:~n"),
+    io:format("Final Bot Paths (with time intervals):~n"),
     lists:foreach(fun({Bot, Path}) ->
-                          io:format("  Bot ~p: ~p~n", [Bot, Path])
+                          Intervals = compress_path(Path),
+                          io:format("  Bot ~p: ~p~n", [Bot, Intervals])
                   end, Paths),
     io:format("Overall time taken for all bots to reach destinations: ~p steps.~n", [TotalTime]).
+
+manual_generate_bots(PositionList) ->
+    manual_generate_bots(PositionList, 1, []).
+
+manual_generate_bots([], _Id, Acc) ->
+    lists:reverse(Acc);
+
+manual_generate_bots([{Start, Goal} | Rest], Id, Acc) ->
+    case {is_valid_position(Start), is_valid_position(Goal)} of
+         {true, true} ->
+             case lists:any(fun(B) ->
+                             (B#bot.start =:= Start) orelse (B#bot.goal =:= Goal)
+                           end, Acc) of
+                 true ->
+                     io:format("Error: Duplicate start or goal for bot ~p: Start ~p, Goal ~p~n", [Id, Start, Goal]),
+                     manual_generate_bots(Rest, Id+1, Acc);
+                 false ->
+                     Bot = #bot{id = Id, start = Start, goal = Goal, path = []},
+                     io:format("Bot ~p generated with start ~p and goal ~p~n", [Id, Start, Goal]),
+                     manual_generate_bots(Rest, Id+1, [Bot | Acc])
+             end;
+         _ ->
+             io:format("Error: Invalid position for bot ~p: Start ~p, Goal ~p~n", [Id, Start, Goal]),
+             manual_generate_bots(Rest, Id+1, Acc)
+    end.
+
+is_valid_position({X, Y}) when is_integer(X), is_integer(Y) ->
+    X >= 1 andalso X =< 10 andalso Y >= 1 andalso Y =< 10;
+is_valid_position(_) ->
+    false.
+
+compress_path(Path) ->
+    compress_path(Path, 0).
+
+compress_path([H|T], StartTime) ->
+    compress_interval(H, StartTime, T, StartTime, []).
+
+compress_interval(CurrentCell, CurrentStart, [], CurrentTime, Acc) ->
+    lists:reverse([{CurrentCell, CurrentStart, CurrentTime} | Acc]);
+compress_interval(CurrentCell, CurrentStart, [H|T], CurrentTime, Acc) ->
+    NextTime = CurrentTime + 1,
+    if
+        H =:= CurrentCell ->
+            compress_interval(CurrentCell, CurrentStart, T, NextTime, Acc);
+        true ->
+            compress_interval(H, NextTime, T, NextTime, [{CurrentCell, CurrentStart, CurrentTime} | Acc])
+    end.
