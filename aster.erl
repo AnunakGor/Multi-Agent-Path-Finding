@@ -1,39 +1,45 @@
-
 -module(aster).
 -export([find_path/3]).
 
 find_path(Start, Goal, Constraints) ->
-    Open = [{heuristic(Start, Goal), 0, Start, [Start]}],
+    InitialF = heuristic(Start, Goal),
+    Node = {InitialF, 0, Start, [Start]},
+    UniqueKey = erlang:unique_integer([monotonic, positive]),
+    Open = gb_trees:insert({InitialF, UniqueKey}, Node, gb_trees:empty()),
     Closed = sets:new(),
     search(Open, Closed, Goal, Constraints).
 
-search([], _Closed, _Goal, _Constraints) ->
-    {error, no_path};
 search(Open, Closed, Goal, Constraints) ->
-    {_, G, Current, Path} = hd(Open),
-    RestOpen = tl(Open),
-    if
-        Current =:= Goal ->
-            lists:reverse(Path);  
+    case gb_trees:is_empty(Open) of
         true ->
-            Time = length(Path) - 1,
-            Neighbors = neighbors(Current),
-            ValidNeighbors = [
-                {Neighbor, G + 1} ||
-                    Neighbor <- Neighbors,
-                    is_valid_move(Current, Neighbor, Time, Constraints)
-            ],
-            NewNodes = [
-                {heuristic(Neighbor, Goal) + NewG, NewG, Neighbor, [Neighbor | Path]}
-                || {Neighbor, NewG} <- ValidNeighbors,
-                   not(sets:is_element({Neighbor, Time+1}, Closed))
-            ],
-            UpdatedOpen = insert_nodes(RestOpen, NewNodes),
-            NewClosed = sets:add_element({Current, Time}, Closed),
-            search(UpdatedOpen, NewClosed, Goal, Constraints)
+            {error, no_path};
+        false ->
+            {_, { _F, G, Current, Path}, OpenRest} = gb_trees:take_smallest(Open),
+            if
+                Current =:= Goal ->
+                    lists:reverse(Path);
+                true ->
+                    Time = length(Path) - 1,
+                    Neighbors = neighbors(Current),
+                    ValidNodes = [ {heuristic(Neighbor, Goal) + (G+1), G+1, Neighbor, [Neighbor | Path]}
+                                   || Neighbor <- Neighbors,
+                                      is_valid_move(Current, Neighbor, Time, Constraints),
+                                      not(sets:is_element({Neighbor, Time+1}, Closed))],
+                    OpenNew = insert_nodes(OpenRest, ValidNodes),
+                    NewClosed = sets:add_element({Current, Time}, Closed),
+                    search(OpenNew, NewClosed, Goal, Constraints)
+            end
     end.
 
-%% manhattan distance 
+insert_nodes(Tree, []) ->
+    Tree;
+insert_nodes(Tree, [Node | Rest]) ->
+    {F, _, _, _} = Node,
+    NewKey = {F, erlang:unique_integer([monotonic, positive])},
+    Tree1 = gb_trees:insert(NewKey, Node, Tree),
+    insert_nodes(Tree1, Rest).
+
+%% manhattan distance heuristic
 heuristic({X1, Y1}, {X2, Y2}) ->
     abs(X1 - X2) + abs(Y1 - Y2).
 
@@ -43,12 +49,11 @@ neighbors({X, Y}) ->
     [ {NX, NY} || {NX, NY} <- Potential, NX >= 1, NX =< 10, NY >= 1, NY =< 10].
 
 is_valid_move(Current, Next, Time, Constraints) ->
-    VertexOk = not lists:any(fun({T, Pos}) -> T =:= Time+1 andalso Pos =:= Next end, Constraints),
+    VertexOk = not lists:any(fun({T, Pos}) ->
+                                  T =:= Time+1 andalso Pos =:= Next
+                              end, Constraints),
     EdgeOk = not lists:any(fun({T, {From, To}}) ->
                                 T =:= Time+1 andalso From =:= Current andalso To =:= Next
                             end, Constraints),
     VertexOk andalso EdgeOk.
 
-insert_nodes(Open, NewNodes) ->
-    AllNodes = Open ++ NewNodes,
-    lists:sort(fun({F1,_,_,_}, {F2,_,_,_}) -> F1 =< F2 end, AllNodes).
