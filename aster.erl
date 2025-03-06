@@ -24,7 +24,7 @@ search(Open, Closed, Goal, Constraints) ->
                 Current =:= Goal -> lists:reverse(Path);
                 true ->
                     Time = length(Path) - 1,
-                    Neighbors = neighbors(Current),
+                    Neighbors = grid_manager:get_neighbors(Current),
                     ValidNodes = [ {heuristic(Neighbor, Goal) + (G+1), G+1, Neighbor, [Neighbor | Path]}
                                    || Neighbor <- Neighbors,
                                       is_valid_move(Current, Neighbor, Time, Constraints),
@@ -48,12 +48,6 @@ insert_nodes(Tree, [Node | Rest]) ->
 -spec heuristic({integer(), integer()}, {integer(), integer()}) -> integer().
 heuristic({X1, Y1}, {X2, Y2}) ->
     abs(X1 - X2) + abs(Y1 - Y2).
-
-%% @doc Generates valid neighboring positions.
--spec neighbors({integer(), integer()}) -> list({integer(), integer()}).
-neighbors({X, Y}) ->
-    Potential = [{X, Y}, {X+1, Y}, {X-1, Y}, {X, Y+1}, {X, Y-1}],
-    [ {NX, NY} || {NX, NY} <- Potential, NX >= 1, NX =< 10, NY >= 1, NY =< 10].
 
 %% @doc Checks if moving from Current to Next is valid given constraints.
 -spec is_valid_move({integer(), integer()}, {integer(), integer()}, integer(), list()) -> boolean().
