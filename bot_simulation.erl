@@ -52,7 +52,9 @@ init_db() ->
     mnesia:start(),
     mnesia:create_table(bot_paths,
         [{attributes, record_info(fields, bot_path)},
-         {disc_copies, [node()]}]).
+         {disc_copies, [node()]}]),
+    grid_manager:init_grid(),
+    ok.
 
 %% @doc Stores bot paths in the Mnesia database.
 -spec store_paths([{integer(), [{integer(), integer()}]}]) -> ok.
