@@ -84,7 +84,7 @@ This module provides several test cases to validate the implementation:
 ---
 ## Commands
 
-Commands to compile the erl files:
+Commands to compile the erl files in erl shell:
  ```bash 
   c(aster).
   c(cbs).
