@@ -39,17 +39,25 @@ calculate_neighbors(X, Y, Width, Height) ->
                  NX >= 1, NX =< Width, 
                  NY >= 1, NY =< Height].
 
+% %% @doc Gets neighbors of a cell from the database
+% -spec get_neighbors({integer(), integer()}) -> list({integer(), integer()}).
+% get_neighbors(Position) ->
+%     Fun = fun() ->
+%             case mnesia:read(grid_cell, Position, read) of
+%                 [#grid_cell{neighbors = Neighbors}] -> Neighbors;
+%                 [] -> [] 
+%             end
+%           end,
+%     {atomic, Result} = mnesia:transaction(Fun),
+%     Result.
+
 %% @doc Gets neighbors of a cell from the database
 -spec get_neighbors({integer(), integer()}) -> list({integer(), integer()}).
 get_neighbors(Position) ->
-    Fun = fun() ->
-            case mnesia:read(grid_cell, Position, read) of
-                [#grid_cell{neighbors = Neighbors}] -> Neighbors;
-                [] -> [] 
-            end
-          end,
-    {atomic, Result} = mnesia:transaction(Fun),
-    Result.
+    case mnesia:dirty_read(grid_cell, Position) of
+        [#grid_cell{neighbors = Neighbors}] -> Neighbors;
+        [] -> []
+    end.
 
 %% @doc Validates if a cell position exists in the grid
 -spec is_valid_cell({integer(), integer()}) -> boolean().
