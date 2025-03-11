@@ -1,20 +1,23 @@
 -module(grid_manager).
 -export([init_grid/0, get_neighbors/1, is_valid_cell/1]).
 
-% Define the record
 -record(grid_cell, {position, neighbors}).
 
-%% @doc Initializes the grid in the Mnesia database
+%% Type Definitions
+
+-type coordinate() :: {integer(), integer()}.
+-type grid_dim() :: pos_integer().
+
+%% @doc Initializes the grid in the Mnesia database and populates it for a 10x10 grid.
 -spec init_grid() -> ok.
 init_grid() ->
-    % Make sure table name matches record name
     mnesia:create_table(grid_cell,
-                       [{attributes, record_info(fields, grid_cell)},
-                        {disc_copies, [node()]}]),
+                        [{attributes, record_info(fields, grid_cell)},
+                         {disc_copies, [node()]}]),
     populate_grid(10, 10).
 
-%% @doc Populates the grid with cell information
--spec populate_grid(integer(), integer()) -> ok.
+%% @doc Populates the grid with cell information for given Width and Height.
+-spec populate_grid(Width :: grid_dim(), Height :: grid_dim()) -> ok | {error, term()}.
 populate_grid(Width, Height) ->
     Transaction = fun() ->
             [begin
@@ -25,41 +28,26 @@ populate_grid(Width, Height) ->
           end,
     case mnesia:transaction(Transaction) of
         {atomic, _Result} -> ok;
-        {aborted, Reason} -> 
+        {aborted, Reason} ->
             io:format("Grid population failed: ~p~n", [Reason]),
             {error, Reason}
     end.
 
-%% @doc Calculates valid neighboring positions for a cell
--spec calculate_neighbors(integer(), integer(), integer(), integer()) -> 
-    list({integer(), integer()}).
+%% @doc Calculates valid neighboring positions for a cell at (X, Y) within grid dimensions Width and Height.
+-spec calculate_neighbors(X :: integer(), Y :: integer(), Width :: grid_dim(), Height :: grid_dim()) -> [coordinate()].
 calculate_neighbors(X, Y, Width, Height) ->
     Potential = [{X, Y}, {X+1, Y}, {X-1, Y}, {X, Y+1}, {X, Y-1}],
-    [{NX, NY} || {NX, NY} <- Potential, 
-                 NX >= 1, NX =< Width, 
-                 NY >= 1, NY =< Height].
+    [{NX, NY} || {NX, NY} <- Potential, NX >= 1, NX =< Width, NY >= 1, NY =< Height].
 
-% %% @doc Gets neighbors of a cell from the database
-% -spec get_neighbors({integer(), integer()}) -> list({integer(), integer()}).
-% get_neighbors(Position) ->
-%     Fun = fun() ->
-%             case mnesia:read(grid_cell, Position, read) of
-%                 [#grid_cell{neighbors = Neighbors}] -> Neighbors;
-%                 [] -> [] 
-%             end
-%           end,
-%     {atomic, Result} = mnesia:transaction(Fun),
-%     Result.
-
-%% @doc Gets neighbors of a cell from the database
--spec get_neighbors({integer(), integer()}) -> list({integer(), integer()}).
+%% @doc Gets the list of neighbor coordinates for the given cell Position from the database.
+-spec get_neighbors(Position :: coordinate()) -> [coordinate()].
 get_neighbors(Position) ->
     case mnesia:dirty_read(grid_cell, Position) of
         [#grid_cell{neighbors = Neighbors}] -> Neighbors;
         [] -> []
     end.
 
-%% @doc Validates if a cell position exists in the grid
--spec is_valid_cell({integer(), integer()}) -> boolean().
+%% @doc Checks if a given cell coordinate is within the valid 10x10 grid boundaries.
+-spec is_valid_cell(Pos :: coordinate()) -> boolean().
 is_valid_cell({X, Y}) ->
     X >= 1 andalso X =< 10 andalso Y >= 1 andalso Y =< 10.
