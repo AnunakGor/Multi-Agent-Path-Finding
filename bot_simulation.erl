@@ -1,11 +1,20 @@
 -module(bot_simulation).
--export([start/0, start_manual/1]).
+-export([start/0, start_manual/1, init_db/0]).
 
+%% Record Definitions
 -record(bot, {id, start, goal, path}).
 -record(bot_path, {bot_id, path}).
 
-%% @doc Starts the bot simulation with randomly generated bots.
-%% It initializes the database, generates bots, and finds paths using CBS.
+%% Type Definitions
+
+-type coordinate() :: {integer(), integer()}.
+-type path() :: [coordinate()].
+-type time() :: non_neg_integer().
+-type bot() :: #bot{}.
+-type bot_path() :: {integer(), path()}.
+-type manual_positions() :: [{coordinate(), coordinate()}].
+
+%% @doc Starts simulation with randomly generated bots.
 -spec start() -> ok.
 start() ->
     Seed = {erlang:monotonic_time(), erlang:unique_integer(), erlang:system_time()},
@@ -23,8 +32,8 @@ start() ->
             simulate(Paths)
     end.
 
-%% @doc Starts the simulation with manually provided bot positions.
--spec start_manual([{ {integer(), integer()}, {integer(), integer()} }]) -> ok | {error, no_valid_bots}.
+%% @doc Starts simulation with manually provided bot positions.
+-spec start_manual(Positions :: manual_positions()) -> ok | {error, no_valid_bots}.
 start_manual(PositionList) ->
     init_db(),
     Bots = manual_generate_bots(PositionList),
@@ -45,31 +54,28 @@ start_manual(PositionList) ->
             end
     end.
 
-%% @doc Initializes the Mnesia database schema and starts the database.
+%% @doc Initializes the Mnesia database (bot_paths table) and grid.
 -spec init_db() -> ok.
 init_db() ->
     mnesia:create_schema([node()]),
     mnesia:start(),
-    mnesia:create_table(bot_paths,
-        [{attributes, record_info(fields, bot_path)},
-         {disc_copies, [node()]}]),
+    mnesia:create_table(bot_paths, [{attributes, record_info(fields, bot_path)},
+                                    {disc_copies, [node()]}]),
     grid_manager:init_grid(),
     ok.
 
-%% @doc Stores bot paths in the Mnesia database.
--spec store_paths([{integer(), [{integer(), integer()}]}]) -> ok.
+%% @doc Stores computed bot paths in the Mnesia database.
+-spec store_paths(Paths :: [bot_path()]) -> ok.
 store_paths(Paths) ->
     Fun = fun() ->
-                  lists:foreach(
-                      fun({BotId, Path}) ->
-                          mnesia:write(#bot_path{bot_id = BotId, path = Path})
-                      end,
-                      Paths)
+                  lists:foreach(fun({BotId, Path}) ->
+                                      mnesia:write(#bot_path{bot_id = BotId, path = Path})
+                                end, Paths)
           end,
     mnesia:transaction(Fun).
 
-%% @doc Generates `N` random bots with unique start and goal positions.
--spec generate_bots(integer()) -> [#bot{}].
+%% @doc Generates N random bots with unique start and goal positions.
+-spec generate_bots(N :: integer()) -> [bot()].
 generate_bots(N) ->
     generate_bots(N, []).
 
@@ -78,37 +84,28 @@ generate_bots(0, Acc) ->
 generate_bots(N, Acc) ->
     Start = {random_between(1,10), random_between(1,10)},
     Goal = {random_between(1,10), random_between(1,10)},
-    case {Start =:= Goal,
-          lists:any(fun(B) ->
-                        (B#bot.start =:= Start) orelse (B#bot.goal =:= Goal)
-                    end, Acc)} of
-        %   lists:any(fun(B) ->
-        %                 (B#bot.start =:= Start) orelse (B#bot.goal =:= Start) orelse
-        %                 (B#bot.start =:= Goal) orelse (B#bot.goal =:= Goal)
-        %             end, Acc)} of
-        {true, _} ->
-            generate_bots(N, Acc);
-        {_, true} ->
-            generate_bots(N, Acc);
+    case {Start =:= Goal, lists:any(fun(B) -> (B#bot.start =:= Start) orelse (B#bot.goal =:= Goal) end, Acc)} of
+        {true, _} -> generate_bots(N, Acc);
+        {_, true} -> generate_bots(N, Acc);
         {false, false} ->
             Bot = #bot{id = N, start = Start, goal = Goal, path = []},
             generate_bots(N-1, [Bot|Acc])
     end.
 
-%% @doc Generates a random integer between `Low` and `High` (inclusive).
--spec random_between(integer(), integer()) -> integer().
+%% @doc Generates a random integer between Low and High (inclusive).
+-spec random_between(Low :: integer(), High :: integer()) -> integer().
 random_between(Low, High) ->
     rand:uniform(High - Low + 1) + Low - 1.
 
-%% @doc Simulates bot movements over time.
--spec simulate([{integer(), [{integer(), integer()}]}]) -> ok.
+%% @doc Simulates bot movements using computed paths.
+-spec simulate(Paths :: [bot_path()]) -> ok.
 simulate(Paths) ->
     TotalTime = lists:max([length(Path) || {_Bot, Path} <- Paths]),
     io:format("Simulation starting. Total time steps: ~p~n", [TotalTime]),
     simulate_steps(Paths, 0, TotalTime).
 
-%% @doc Simulates step-by-step movements of bots.
--spec simulate_steps([{integer(), [{integer(), integer()}]}], integer(), integer()) -> ok.
+%% @doc Simulates bot movements step-by-step given Paths, current Time, and TotalTime.
+-spec simulate_steps(Paths :: [bot_path()], Time :: time(), TotalTime :: time()) -> ok.
 simulate_steps(Paths, Time, TotalTime) when Time >= TotalTime ->
     io:format("Simulation complete. Total time: ~p steps.~n", [TotalTime]),
     print_summary(Paths, TotalTime);
@@ -118,19 +115,19 @@ simulate_steps(Paths, Time, TotalTime) ->
                           Pos = get_position(Path, Time),
                           io:format(" Bot ~p at position ~p~n", [Bot, Pos])
                   end, Paths),
-    % timer:sleep(500),  
+    %% timer:sleep(500),
     simulate_steps(Paths, Time+1, TotalTime).
 
-%% @doc Retrieves the bot's position at a given time step.
--spec get_position([{integer(), integer()}], integer()) -> {integer(), integer()}.
+%% @doc Retrieves the bot's position at the given Time from its Path.
+-spec get_position(Path :: path(), Time :: time()) -> coordinate().
 get_position(Path, Time) ->
     if
         Time < length(Path) -> lists:nth(Time+1, Path);
         true -> lists:last(Path)
     end.
 
-%% @doc Prints the final summary of bot movements.
--spec print_summary([{integer(), [{integer(), integer()}]}], integer()) -> ok.
+%% @doc Prints a summary of final bot paths with time intervals.
+-spec print_summary(Paths :: [bot_path()], TotalTime :: time()) -> ok.
 print_summary(Paths, TotalTime) ->
     io:format("Final Bot Paths (with time intervals):~n"),
     lists:foreach(fun({Bot, Path}) ->
@@ -140,7 +137,7 @@ print_summary(Paths, TotalTime) ->
     io:format("Overall time taken for all bots to reach destinations: ~p steps.~n", [TotalTime]).
 
 %% @doc Generates bot records from manually provided positions.
--spec manual_generate_bots([{ {integer(), integer()}, {integer(), integer()} }]) -> [#bot{}].
+-spec manual_generate_bots(Positions :: manual_positions()) -> [bot()].
 manual_generate_bots(PositionList) ->
     manual_generate_bots(PositionList, 1, []).
 
@@ -149,9 +146,7 @@ manual_generate_bots([], _Id, Acc) ->
 manual_generate_bots([{Start, Goal} | Rest], Id, Acc) ->
     case {is_valid_position(Start), is_valid_position(Goal)} of
          {true, true} ->
-             case lists:any(fun(B) ->
-                             (B#bot.start =:= Start) orelse (B#bot.goal =:= Goal)
-                           end, Acc) of
+             case lists:any(fun(B) -> (B#bot.start =:= Start) orelse (B#bot.goal =:= Goal) end, Acc) of
                  true ->
                      io:format("Error: Duplicate start or goal for bot ~p: Start ~p, Goal ~p~n", [Id, Start, Goal]),
                      manual_generate_bots(Rest, Id+1, Acc);
@@ -165,25 +160,29 @@ manual_generate_bots([{Start, Goal} | Rest], Id, Acc) ->
              manual_generate_bots(Rest, Id+1, Acc)
     end.
 
-%% @doc Checks if a given position `{X,Y}` is within grid bounds.
--spec is_valid_position({integer(), integer()}) -> boolean().
+%% @doc Checks if a given coordinate is within grid bounds (1 to 10).
+-spec is_valid_position(Pos :: coordinate()) -> boolean().
 is_valid_position({X, Y}) when is_integer(X), is_integer(Y) ->
     X >= 1 andalso X =< 10 andalso Y >= 1 andalso Y =< 10;
 is_valid_position(_) ->
     false.
 
+%% @doc Compresses a bot's path into intervals of the form {Cell, StartTime, EndTime}.
+-spec compress_path(Path :: path()) -> [{coordinate(), integer(), integer()}].
+compress_path([]) ->
+    [];
+compress_path([H|T]) ->
+    compress_path([H|T], 0).
 
-%% @doc Compresses a bot's path into a list of intervals `{Cell, StartTime, EndTime}`.
--spec compress_path([{integer(), integer()}]) -> [{ {integer(), integer()}, integer(), integer() }].
-compress_path(Path) ->
-    compress_path(Path, 0).
-
+%% @doc Helper: Compresses consecutive positions into intervals where the bot remains at the same coordinate.
+-spec compress_path(Path :: path(), StartTime :: integer()) -> [{coordinate(), integer(), integer()}].
+compress_path([], _StartTime) ->
+    [];
 compress_path([H|T], StartTime) ->
     compress_interval(H, StartTime, T, StartTime, []).
 
-%% @doc Compresses a sequence of positions into intervals where the bot stays at the same position.
--spec compress_interval({integer(), integer()}, integer(), [{integer(), integer()}], integer(), [{ {integer(), integer()}, integer(), integer() }]) ->
-    [{ {integer(), integer()}, integer(), integer() }].
+%% @doc Compresses consecutive positions into intervals where the bot remains at the same coordinate.
+-spec compress_interval(CurrentCell :: coordinate(), CurrentStart :: integer(), Rest :: path(), CurrentTime :: integer(), Acc :: [{coordinate(), integer(), integer()}]) -> [{coordinate(), integer(), integer()}].
 compress_interval(CurrentCell, CurrentStart, [], CurrentTime, Acc) ->
     lists:reverse([{CurrentCell, CurrentStart, CurrentTime} | Acc]);
 compress_interval(CurrentCell, CurrentStart, [H|T], CurrentTime, Acc) ->
