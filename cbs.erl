@@ -20,7 +20,7 @@
 -spec search(Bots :: [bot()]) -> {error, no_solution} | [bot_path()].
 search(Bots) ->
     InitialConstraints = [],
-    InitialPaths = [{BotId, aster:find_path(Start, Goal, InitialConstraints)}
+    InitialPaths = [{BotId, astar:find_path(Start, Goal, InitialConstraints)}
                      || {BotId, Start, Goal} <- Bots],
     Root = #node{constraints = InitialConstraints, paths = InitialPaths, cost = compute_cost(InitialPaths)},
     CBSOpen = [Root],
